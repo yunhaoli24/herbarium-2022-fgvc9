@@ -1,29 +1,39 @@
 import torch
 import torch.nn as nn
 import yaml
+from torchvision import transforms
 from torchvision.models import resnet18
 from easydict import EasyDict
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from accelerate import Accelerator
+
+from src.loader import HerbariumDataset
 from src.utils import same_seeds, save_model
 
 if __name__ == '__main__':
     # 读取配置
+    accelerator = Accelerator()
     config = EasyDict(yaml.load(open('./config.yml', 'r', encoding="utf-8"), Loader=yaml.FullLoader))
     same_seeds(42)
-    accelerator = Accelerator()
-    if accelerator.is_main_process():
+    if accelerator.is_main_process:
         print(config)
 
-    # TODO: 加载数据
-    train_loader = None
-    val_loader = None
-    num_classes = None
+    target_transform = transforms.Compose([
+        transforms.Resize(size=(224, 224)),
+        transforms.ToTensor(),
+    ])
+
+    train_dataset = HerbariumDataset(root=config.trainer.train_dataset_path, transform=target_transform)
+    val_dataset = HerbariumDataset(root=config.trainer.val_dataset_path, transform=target_transform)
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.trainer.batch_size, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config.trainer.batch_size, shuffle=True)
+    num_classes = 15501
 
     # 初始化模型，如果有GPU就用GPU，有几张卡就用几张
-    model = resnet18(pretrained=True, num_classes=num_classes)
+    model = resnet18(pretrained=False, num_classes=num_classes)
     if config.trainer.resume:
         model.load_state_dict(torch.load(config.model.checkpoint_path, map_location=torch.device('cpu')))
 
@@ -41,7 +51,7 @@ if __name__ == '__main__':
     best_acc = 0
     patience = config.trainer.num_epochs / 2
     # 开始训练
-    if accelerator.is_main_process():
+    if accelerator.is_main_process:
         print("开始训练！")
 
     for epoch in range(config.trainer.num_epochs):
@@ -72,7 +82,7 @@ if __name__ == '__main__':
             val_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation')
 
         # 保存模型
-        if accelerator.is_main_process():
+        if accelerator.is_main_process:
             # 计算loss和acc并保存到tensorboard
             train_loss = total_loss / (len(train_loader) * config.trainer.batch_size)
             val_acc = total_correct / (len(val_loader) * config.trainer.batch_size)
