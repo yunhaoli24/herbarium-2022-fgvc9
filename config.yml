@@ -7,3 +7,6 @@ trainer:
   num_workers: 8
   train_dataset_path: /dataset/cv/cls/herbarium-2022-fgvc9/train_images
   val_dataset_path: /dataset/cv/cls/herbarium-2022-fgvc9/test_images
+model:
+  save_name: resnet.pth
+  num_classes: 15501

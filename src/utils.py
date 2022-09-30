@@ -3,12 +3,12 @@ import torch
 import torch.nn as nn
 
 
-def save_model(model: nn.Module, config):
+def save_model(model: nn.Module, path):
     if hasattr(model, "module"):
         state_dict = model.module.state_dict()
     else:
         state_dict = model.state_dict()
-    torch.save(state_dict, config.model.checkpoint_path)
+    torch.save(state_dict, path)
 
 
 def same_seeds(seed):
