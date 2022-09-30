@@ -27,19 +27,15 @@ if __name__ == '__main__':
     ])
 
     accelerator.print('加载数据集...')
-    # train_dataset = HerbariumDataset(root=config.trainer.train_dataset_path, transform=target_transform)
-    # val_dataset = HerbariumDataset(root=config.trainer.val_dataset_path, transform=target_transform)
-
-    train_dataset = torchvision.datasets.CIFAR10(root="./data/", transform=target_transform, train=True, download=True)
-    val_dataset = torchvision.datasets.CIFAR10(root="./data/", transform=target_transform, train=False, download=True)
+    train_dataset = HerbariumDataset(root=config.trainer.train_dataset_path, transform=target_transform)
+    val_dataset = HerbariumDataset(root=config.trainer.val_dataset_path, transform=target_transform)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.trainer.batch_size, shuffle=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config.trainer.batch_size, shuffle=True)
-    num_classes = 10
 
     # 初始化模型，如果有GPU就用GPU，有几张卡就用几张
     accelerator.print('加载模型')
-    model = resnet18(pretrained=False, num_classes=num_classes)
+    model = resnet18(pretrained=False, num_classes=config.model.num_classes)
     if config.trainer.resume:
         model.load_state_dict(torch.load(config.model.checkpoint_path, map_location=torch.device('cpu')))
 
