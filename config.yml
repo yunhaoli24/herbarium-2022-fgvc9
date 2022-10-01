@@ -1,12 +1,12 @@
 trainer:
   num_epochs: 200
-  batch_size: 64
+  batch_size: 128
   resume: False
   lr: 0.0001
-  muti_gpu: True
   num_workers: 8
   train_dataset_path: /dataset/cv/cls/herbarium-2022-fgvc9/train_images
   val_dataset_path: /dataset/cv/cls/herbarium-2022-fgvc9/test_images
+  dataset_path: /dataset/cv/cls/herbarium-2022-fgvc9/
 model:
   save_name: resnet.pth
   num_classes: 15501

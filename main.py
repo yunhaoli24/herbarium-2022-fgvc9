@@ -4,14 +4,14 @@ import torchvision.datasets
 import yaml
 import torch.nn.functional as F
 from torchvision import transforms
-from torchvision.models import resnet18
+from torchvision.models import resnet18, vit_l_16, vit_b_16
 from easydict import EasyDict
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from accelerate import Accelerator
 
-from src.loader import HerbariumDataset
+from src.loader import HerbariumDataset, target_transform
 from src.utils import same_seeds, save_model
 
 if __name__ == '__main__':
@@ -20,12 +20,6 @@ if __name__ == '__main__':
     config = EasyDict(yaml.load(open('./config.yml', 'r', encoding="utf-8"), Loader=yaml.FullLoader))
     same_seeds(42)
     accelerator.print(config)
-
-    target_transform = transforms.Compose([
-        transforms.Resize(size=(224, 224)),
-        transforms.Normalize(mean=0.5, std=0.5),
-        transforms.ToTensor(),
-    ])
 
     accelerator.print('加载数据集...')
     train_dataset = HerbariumDataset(root=config.trainer.train_dataset_path, transform=target_transform)
@@ -36,7 +30,7 @@ if __name__ == '__main__':
 
     # 初始化模型，如果有GPU就用GPU，有几张卡就用几张
     accelerator.print('加载模型')
-    model = resnet18(pretrained=False, num_classes=config.model.num_classes)
+    model = vit_b_16(pretrained=False, num_classes=config.model.num_classes)
     if config.trainer.resume:
         model.load_state_dict(torch.load(config.model.checkpoint_path, map_location=torch.device('cpu')))
 
