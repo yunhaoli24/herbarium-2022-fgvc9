@@ -12,14 +12,27 @@ target_transform = transforms.Compose([
 ])
 
 
-class HerbariumDataset(torchvision.datasets.ImageFolder):
-    pass
-    # def __init__(self, *args, **kwargs):
-    #     super(ImageFolder, self).__init__(*args, **kwargs)
-    #
-    # def __getitem__(self, index):
-    #     output = super(ImageFolder, self).__getitem__(index)
-    #     return output
+
+class HerbariumDataset(torchvision.datasets.VisionDataset):
+    def __init__(self, root: str, common_list: List[dict],transforms: torchvision.transforms.Compose, *args, **kwargs) -> None:
+        super(HerbariumTestDataset, self).__init__(root, transforms, *args, **kwargs)
+
+        self.common_list = common_list
+        self.loader = torchvision.datasets.folder.default_loader
+
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, int]:
+        """
+        返回一个样本
+        :param index: 样本下标
+        :return: 图片Tensor， image_id
+        """
+        path = self.root + 'test_images/' + self.common_list[index]["file_name"]
+        image = self.loader(path)
+        sample = self.transforms(image)
+        return sample, self.common_list[index]['category_id']
+
+    def __len__(self) -> int:
+        return len(self.common_list)
 
 
 class HerbariumTestDataset(torchvision.datasets.VisionDataset):
