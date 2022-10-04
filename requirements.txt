@@ -7,3 +7,5 @@ tqdm
 PyYaml
 tensorboard
 pandas
+evaluate
+sklearn

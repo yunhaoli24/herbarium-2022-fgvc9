@@ -1,9 +1,7 @@
+import evaluate
 import torch
-import torch.nn as nn
-import torchvision.datasets
 import yaml
 import torch.nn.functional as F
-from torchvision import transforms
 from torchvision.models import resnet18, vit_l_16, vit_b_16
 from easydict import EasyDict
 from torch.optim import lr_scheduler
@@ -69,17 +67,13 @@ if __name__ == '__main__':
 
         # 验证
         model.eval()
-        accurate = 0
-        num_elements = 0
+        evaluator = evaluate.combine(["accuracy", "f1", "precision", "recall"])
         val_bar = tqdm(val_loader, disable=not accelerator.is_local_main_process)
         for features, labels in val_bar:
             with torch.no_grad():
                 logits = model(features)
             predictions = logits.argmax(dim=-1)
-            predictions, references = accelerator.gather_for_metrics((predictions, labels))
-            accurate_preds = predictions == references
-            num_elements += accurate_preds.shape[0]
-            accurate += accurate_preds.long().sum()
+            evaluator.add_batch(predictions=predictions, references=labels)
 
             if accelerator.is_local_main_process:
                 val_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation')
@@ -87,14 +81,15 @@ if __name__ == '__main__':
         # 保存模型
         if accelerator.is_main_process:
             # 计算loss和acc并保存到tensorboard
-            train_loss = total_loss / (len(train_loader) * config.trainer.batch_size)
-            eval_metric = accurate.item() / num_elements
+            train_loss = total_loss / len(train_dataset)
+            evaluate_result = evaluator.compute()
 
-            print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] loss = {train_loss:.5f}, acc = {100 * eval_metric:.5f} %")
+            print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] loss = {train_loss:.5f}, acc = {100 * evaluate_result['accuracy']:.5f} %")
+            print(evaluate_result)
             writer.add_scalar('Train Loss', train_loss, epoch)
-            writer.add_scalar('Val Acc', eval_metric, epoch)
-            if eval_metric > best_acc:
-                best_acc = eval_metric
+            writer.add_scalar('Val Acc', evaluate_result['accuracy'], epoch)
+            if evaluate_result['accuracy'] > best_acc:
+                best_acc = evaluate_result['accuracy']
                 print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] 保存模型")
                 save_model(model, config.model.save_name)
                 stale = 0

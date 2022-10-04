@@ -1,3 +1,6 @@
+import types
+
+import evaluate
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -17,17 +20,24 @@ def kaggle_test(model: nn.Module, config: EasyDict):
     accelerator.print('加载数据集...')
     test_dataset = HerbariumTestDataset(root=config.trainer.dataset_path, transforms=target_transform)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=config.trainer.batch_size, shuffle=False)
+    model.eval()
+    accuracy = evaluate.load("accuracy")
     test_loader, model = accelerator.prepare(test_loader, model)
 
-    ids = []
-    predictions = []
+    accelerator.print('开始预测')
     for images, image_ids in tqdm(test_loader, disable=not accelerator.is_local_main_process):
         with torch.no_grad():
             logits = model(images)
-        predictions.extend(list(logits.argmax(dim=-1).detach().cpu().numpy()))
-        ids.extend(list(image_ids))
+        accuracy.add_batch(predictions=logits.argmax(dim=-1), references=image_ids)
+
+    accelerator.wait_for_everyone()
+    accuracy.finalize = types.MethodType(lambda self: self._finalize(), accuracy)
+    accuracy.finalize()
+    predictions = accuracy.data['predictions']
+    references = accuracy.data['references']
     if accelerator.is_local_main_process:
-        submission = pd.DataFrame({"id": ids, "Predicted": predictions}).set_index("id")
+        print(len(predictions))
+        submission = pd.DataFrame({"id": references, "Predicted": predictions}).set_index("id")
         submission.sort_index()
         submission.to_csv("submission.csv")
 

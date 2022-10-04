@@ -40,8 +40,7 @@ class HerbariumTestDataset(torchvision.datasets.VisionDataset):
         super(HerbariumTestDataset, self).__init__(root, transforms, *args, **kwargs)
         with open(root + 'test_metadata.json') as fp:
             self.test_metadata_json: List[Dict] = json.load(fp)
-        # self.test_metadata_json = self.test_metadata_json[:1000]
-        self.loader = torchvision.datasets.folder.default_loader
+        self.loader: Callable = torchvision.datasets.folder.default_loader
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, int]:
         """
@@ -52,7 +51,7 @@ class HerbariumTestDataset(torchvision.datasets.VisionDataset):
         path = self.root + 'test_images/' + self.test_metadata_json[index]['file_name']
         image = self.loader(path)
         sample = self.transforms(image)
-        return sample, self.test_metadata_json[index]['image_id']
+        return sample, int(self.test_metadata_json[index]['image_id'])
 
     def __len__(self) -> int:
         return len(self.test_metadata_json)
