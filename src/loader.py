@@ -1,38 +1,50 @@
 import json
+from typing import Callable, List, Dict, Tuple
+
 import torch
 import torchvision
-from typing import Any, Optional, Callable, List, Dict, Tuple
+import torch.utils.data.dataset
 
-from torchvision import transforms
+from easydict import EasyDict
 
-target_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Resize(size=(224, 224)),
-    transforms.Normalize(mean=0.5, std=0.5),
+from src.utils import split_data_8_2
+
+train_transform = torchvision.transforms.Compose([
+    torchvision.transforms.Resize(size=(224, 224)),
+    torchvision.transforms.RandomResizedCrop(224),
+    torchvision.transforms.RandomHorizontalFlip(),
+    torchvision.transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
+    torchvision.transforms.ToTensor(),
+    torchvision.transforms.Normalize(mean=0.5, std=0.5),
+])
+
+test_transform = torchvision.transforms.Compose([
+    torchvision.transforms.Resize(size=(224, 224)),
+    torchvision.transforms.ToTensor(),
+    torchvision.transforms.Normalize(mean=0.5, std=0.5),
 ])
 
 
-
 class HerbariumDataset(torchvision.datasets.VisionDataset):
-    def __init__(self, root: str, common_list: List[dict],transforms: torchvision.transforms.Compose, *args, **kwargs) -> None:
-        super(HerbariumTestDataset, self).__init__(root, transforms, *args, **kwargs)
+    def __init__(self, root: str, sample_list: List[dict], transforms: torchvision.transforms.Compose, *args, **kwargs) -> None:
+        super(HerbariumDataset, self).__init__(root, transforms, *args, **kwargs)
 
-        self.common_list = common_list
+        self.sample_list = sample_list
         self.loader = torchvision.datasets.folder.default_loader
 
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, int]:
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         返回一个样本
         :param index: 样本下标
-        :return: 图片Tensor， image_id
+        :return: 图片Tensor， 图片标签
         """
-        path = self.root + 'test_images/' + self.common_list[index]["file_name"]
+        path = self.root + 'train_images/' + self.sample_list[index]["file_name"]
         image = self.loader(path)
         sample = self.transforms(image)
-        return sample, self.common_list[index]['category_id']
+        return sample, self.sample_list[index]['category_id']
 
     def __len__(self) -> int:
-        return len(self.common_list)
+        return len(self.sample_list)
 
 
 class HerbariumTestDataset(torchvision.datasets.VisionDataset):
@@ -55,3 +67,18 @@ class HerbariumTestDataset(torchvision.datasets.VisionDataset):
 
     def __len__(self) -> int:
         return len(self.test_metadata_json)
+
+
+def get_dataloader(config: EasyDict) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+    train_samples, val_samples = split_data_8_2(config.trainer.dataset_path + 'train_metadata.json')
+
+    train_dataset = HerbariumDataset(root=config.trainer.dataset_path, sample_list=train_samples, transforms=train_transform)
+    val_dataset = HerbariumDataset(root=config.trainer.dataset_path, sample_list=val_samples, transforms=test_transform)
+
+    # train_subset = torch.utils.data.Subset(train_dataset, range(int(len(train_dataset) * 0.001)))
+    # val_subset = torch.utils.data.Subset(val_dataset, range(int(len(val_dataset) * 0.001)))
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.trainer.batch_size, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config.trainer.batch_size, shuffle=True)
+
+    return train_loader, val_loader

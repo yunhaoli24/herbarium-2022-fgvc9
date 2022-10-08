@@ -1,16 +1,16 @@
 import evaluate
+import timm
 import torch
 import yaml
 import torch.nn.functional as F
-from torchvision.models import resnet18, vit_l_16, vit_b_16
 from easydict import EasyDict
 from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from accelerate import Accelerator
 
-from src.loader import HerbariumDataset, target_transform
-from src.utils import same_seeds, save_model
+from src.loader import get_dataloader
+from src.utils import same_seeds
 
 if __name__ == '__main__':
     # 读取配置
@@ -20,15 +20,11 @@ if __name__ == '__main__':
     accelerator.print(config)
 
     accelerator.print('加载数据集...')
-    train_dataset = HerbariumDataset(root=config.trainer.train_dataset_path, transform=target_transform)
-    val_dataset = HerbariumDataset(root=config.trainer.val_dataset_path, transform=target_transform)
-
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.trainer.batch_size, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config.trainer.batch_size, shuffle=True)
+    train_loader, val_loader = get_dataloader(config)
 
     # 初始化模型，如果有GPU就用GPU，有几张卡就用几张
     accelerator.print('加载模型')
-    model = vit_b_16(pretrained=False, num_classes=config.model.num_classes)
+    model = timm.create_model('swin_base_patch4_window7_224', pretrained=False, num_classes=config.model.num_classes)
     if config.trainer.resume:
         model.load_state_dict(torch.load(config.model.checkpoint_path, map_location=torch.device('cpu')))
 
@@ -39,7 +35,7 @@ if __name__ == '__main__':
     model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(model, optimizer, scheduler, train_loader, val_loader)
 
     # Tensorboard
-    writer = SummaryWriter()
+    writer = SummaryWriter() if accelerator.is_local_main_process else None
 
     stale = 0
     best_acc = 0
@@ -51,55 +47,58 @@ if __name__ == '__main__':
         model.train()
 
         # 训练
-        total_loss = 0
+        train_loss = 0
+        step = 0
         train_bar = tqdm(train_loader, disable=not accelerator.is_local_main_process)
+        if accelerator.is_local_main_process:
+            train_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training')
         for features, labels in train_bar:
             logits = model(features)
             loss = F.cross_entropy(logits, labels)
-            total_loss += loss.detach().float()
             accelerator.backward(loss)
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad()
-
             if accelerator.is_local_main_process:
-                train_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training')
+                train_loss = '{0:1.5f}'.format(loss)
+                train_bar.set_postfix({'loss': f'{train_loss}'})
+                writer.add_scalar('Train Loss', loss, step)
+                step += 1
 
         # 验证
         model.eval()
-        evaluator = evaluate.combine(["accuracy", "f1", "precision", "recall"])
+        evaluator = evaluate.load("accuracy")
         val_bar = tqdm(val_loader, disable=not accelerator.is_local_main_process)
+        if accelerator.is_local_main_process:
+            val_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation')
         for features, labels in val_bar:
             with torch.no_grad():
                 logits = model(features)
             predictions = logits.argmax(dim=-1)
             evaluator.add_batch(predictions=predictions, references=labels)
 
-            if accelerator.is_local_main_process:
-                val_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation')
+        # 计算loss和acc并保存到tensorboard
+        evaluate_result = evaluator.compute()
+        accelerator.print(evaluate_result)
+
+        accelerator.print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] loss = {train_loss}, acc = {100 * evaluate_result['accuracy']:.5f} %")
+
+        if accelerator.is_local_main_process:
+            writer.add_scalar('Val Acc', evaluate_result['accuracy'], epoch)
 
         # 保存模型
-        if accelerator.is_main_process:
-            # 计算loss和acc并保存到tensorboard
-            train_loss = total_loss / len(train_dataset)
-            evaluate_result = evaluator.compute()
+        if evaluate_result['accuracy'] > best_acc:
+            best_acc = evaluate_result['accuracy']
+            accelerator.print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] 保存模型")
+            # 保存模型
+            accelerator.wait_for_everyone()
+            accelerator.save(accelerator.unwrap_model(model).state_dict(), config.model.save_name)
+            stale = 0
+        else:
+            stale += 1
+            if stale > patience:
+                accelerator.print(f"连续的 {patience}  epochs 模型没有提升，停止训练")
+                accelerator.end_training()
+                break
 
-            print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] loss = {train_loss:.5f}, acc = {100 * evaluate_result['accuracy']:.5f} %")
-            print(evaluate_result)
-            writer.add_scalar('Train Loss', train_loss, epoch)
-            writer.add_scalar('Val Acc', evaluate_result['accuracy'], epoch)
-            if evaluate_result['accuracy'] > best_acc:
-                best_acc = evaluate_result['accuracy']
-                print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] 保存模型")
-                save_model(model, config.model.save_name)
-                stale = 0
-            else:
-                stale += 1
-                if stale > patience:
-                    print(f"连续的 {patience}  epochs 模型没有提升，停止训练")
-                    accelerator.end_training()
-                    break
-
-    print(f"最高acc: {best_acc:.5f}")
-    # 模型最后验证
-    # 还没写
+    accelerator.print(f"最高acc: {best_acc:.5f}")

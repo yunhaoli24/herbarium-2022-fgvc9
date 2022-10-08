@@ -9,3 +9,4 @@ tensorboard
 pandas
 evaluate
 sklearn
+timm
