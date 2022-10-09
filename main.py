@@ -26,7 +26,8 @@ if __name__ == '__main__':
     accelerator.print('加载模型')
     model = timm.create_model('swin_base_patch4_window7_224', pretrained=False, num_classes=config.model.num_classes)
     if config.trainer.resume:
-        model.load_state_dict(torch.load(config.model.checkpoint_path, map_location=torch.device('cpu')))
+        accelerator.print(f'从 {config.model.save_name} 加载预训练模型')
+        model.load_state_dict(torch.load(config.model.save_name, map_location=torch.device('cpu')))
 
     # 定义训练参数
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.trainer.lr)  # 优化器
@@ -39,16 +40,16 @@ if __name__ == '__main__':
 
     stale = 0
     best_acc = 0
+    step = 0
     patience = config.trainer.num_epochs / 2
     # 开始训练
     accelerator.print("开始训练！")
 
     for epoch in range(config.trainer.num_epochs):
-        model.train()
 
         # 训练
+        model.train()
         train_loss = 0
-        step = 0
         train_bar = tqdm(train_loader, disable=not accelerator.is_local_main_process)
         if accelerator.is_local_main_process:
             train_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training')

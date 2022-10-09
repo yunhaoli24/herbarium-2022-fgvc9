@@ -10,7 +10,7 @@ from easydict import EasyDict
 from torchvision.models import vit_b_16
 from tqdm.auto import tqdm
 
-from src.loader import HerbariumTestDataset, target_transform
+from src.loader import HerbariumTestDataset, test_transform
 
 
 def kaggle_test(model: nn.Module, config: EasyDict):
@@ -18,7 +18,7 @@ def kaggle_test(model: nn.Module, config: EasyDict):
 
     accelerator.print(config)
     accelerator.print('加载数据集...')
-    test_dataset = HerbariumTestDataset(root=config.trainer.dataset_path, transforms=target_transform)
+    test_dataset = HerbariumTestDataset(root=config.trainer.dataset_path, transforms=test_transform)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=config.trainer.batch_size, shuffle=False)
     model.eval()
     accuracy = evaluate.load("accuracy")
