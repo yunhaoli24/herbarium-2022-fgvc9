@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 from accelerate import Accelerator
 
 from src.loader import get_dataloader
-from src.utils import same_seeds
+from src.utils import same_seeds, save_model, load_model
 
 if __name__ == '__main__':
     # 读取配置
@@ -25,27 +25,32 @@ if __name__ == '__main__':
     # 初始化模型，如果有GPU就用GPU，有几张卡就用几张
     accelerator.print('加载模型')
     model = timm.create_model('swin_base_patch4_window7_224', pretrained=False, num_classes=config.model.num_classes)
-    if config.trainer.resume:
-        accelerator.print(f'从 {config.model.save_name} 加载预训练模型')
-        model.load_state_dict(torch.load(config.model.save_name, map_location=torch.device('cpu')))
 
     # 定义训练参数
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.trainer.lr)  # 优化器
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=(config.trainer.num_epochs / 10), eta_min=1e-5)
 
-    model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(model, optimizer, scheduler, train_loader, val_loader)
-
     # Tensorboard
     writer = SummaryWriter() if accelerator.is_local_main_process else None
 
+    start_epoch = 0
     stale = 0
     best_acc = 0
     step = 0
     patience = config.trainer.num_epochs / 2
+
+    # 尝试继续训练
+    if config.trainer.resume:
+        accelerator.print(f'从 {config.model.save_name} 加载预训练模型')
+        model, optimizer, scheduler, start_epoch = load_model(config.model.save_name, model, optimizer, scheduler)
+        accelerator.print(f'加载训练状态成功！从 epoch {start_epoch + 1} 开始训练')
+
+    model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(model, optimizer, scheduler, train_loader, val_loader)
+
     # 开始训练
     accelerator.print("开始训练！")
 
-    for epoch in range(config.trainer.num_epochs):
+    for epoch in range(start_epoch, config.trainer.num_epochs):
 
         # 训练
         model.train()
@@ -92,8 +97,7 @@ if __name__ == '__main__':
             best_acc = evaluate_result['accuracy']
             accelerator.print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] 保存模型")
             # 保存模型
-            accelerator.wait_for_everyone()
-            accelerator.save(accelerator.unwrap_model(model).state_dict(), config.model.save_name)
+            save_model(config.model.save_name, epoch, model, optimizer, scheduler, accelerator)
             stale = 0
         else:
             stale += 1

@@ -1,16 +1,49 @@
 import json
+from typing import Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
+from accelerate import Accelerator
 
 
-def save_model(model: nn.Module, path):
-    if hasattr(model, "module"):
-        state_dict = model.module.state_dict()
+def save_model(path: str, epoch: int,
+               model: nn.Module,
+               optimizer: torch.optim.Optimizer,
+               scheduler: torch.optim.lr_scheduler._LRScheduler,
+               accelerator: Accelerator):
+    """
+    保存训练状态
+    """
+    accelerator.wait_for_everyone()
+    save_dict = {
+        'model': accelerator.unwrap_model(model).state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'scheduler': scheduler.state_dict(),
+        'epoch': epoch
+    }
+    accelerator.save(save_dict, path)
+
+
+def download_model(download_path, save_path=None, check_hash=True) -> nn.Module:
+    if download_path.startswith('http'):
+        state_dict = torch.hub.load_state_dict_from_url(download_path, model_dir=save_path, check_hash=check_hash, map_location=torch.device('cpu'))
     else:
-        state_dict = model.state_dict()
-    torch.save(state_dict, path)
+        state_dict = torch.load(download_path, map_location=torch.device('cpu'))
+    return state_dict
+
+
+def load_model(path: str,
+               model: nn.Module,
+               optimizer: torch.optim.Optimizer,
+               scheduler: torch.optim.lr_scheduler._LRScheduler,
+               ) -> Tuple[nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler, int]:
+    state_dict = download_model(path)
+    model.load_state_dict(state_dict['model'])
+    optimizer.load_state_dict(state_dict['optimizer'])
+    scheduler.load_state_dict(state_dict['scheduler'])
+    epoch = state_dict['epoch']
+    return model, optimizer, scheduler, epoch
 
 
 def same_seeds(seed):
