@@ -6,5 +6,5 @@ trainer:
   num_workers: 8
   dataset_path: /dataset/cv/cls/herbarium-2022-fgvc9/
 model:
-  save_name: resnet.pth
+  save_name: swin.pth
   num_classes: 15505

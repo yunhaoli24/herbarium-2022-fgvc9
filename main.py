@@ -28,7 +28,7 @@ if __name__ == '__main__':
 
     # 定义训练参数
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.trainer.lr)  # 优化器
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=(config.trainer.num_epochs / 10), eta_min=1e-5)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.trainer.num_epochs)
 
     # Tensorboard
     writer = SummaryWriter() if accelerator.is_local_main_process else None

@@ -2,6 +2,7 @@ import types
 
 import evaluate
 import pandas as pd
+import timm
 import torch
 import torch.nn as nn
 import yaml
@@ -17,6 +18,7 @@ def kaggle_test(model: nn.Module, config: EasyDict):
     accelerator = Accelerator()
 
     accelerator.print(config)
+    accelerator.print(accelerator.device)
     accelerator.print('加载数据集...')
     test_dataset = HerbariumTestDataset(root=config.trainer.dataset_path, transforms=test_transform)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=config.trainer.batch_size, shuffle=False)
@@ -35,16 +37,17 @@ def kaggle_test(model: nn.Module, config: EasyDict):
     accuracy.finalize()
     predictions = accuracy.data['predictions']
     references = accuracy.data['references']
+    accelerator.wait_for_everyone()
+    print(len(predictions))
+    submission = pd.DataFrame({"id": references, "Predicted": predictions}).set_index("id")
     if accelerator.is_local_main_process:
-        print(len(predictions))
-        submission = pd.DataFrame({"id": references, "Predicted": predictions}).set_index("id")
         submission.sort_index()
         submission.to_csv("submission.csv")
 
 
 if __name__ == '__main__':
     config = EasyDict(yaml.load(open('./config.yml', 'r', encoding="utf-8"), Loader=yaml.FullLoader))
-    model: nn.Module = vit_b_16(pretrained=False, num_classes=config.model.num_classes)
+    model: nn.Module = timm.create_model('swin_base_patch4_window7_224', pretrained=False, num_classes=config.model.num_classes)
     model.load_state_dict(torch.load(config.model.save_name, map_location=torch.device('cpu')))
 
     kaggle_test(model, config)

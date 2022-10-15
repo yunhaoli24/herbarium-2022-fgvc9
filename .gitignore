@@ -1,1 +1,5 @@
 .idea
+*.pth
+*.csv
+runs
+*.pyc
