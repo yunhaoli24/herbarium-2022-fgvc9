@@ -10,13 +10,17 @@ from tqdm.auto import tqdm
 from accelerate import Accelerator
 
 from src.loader import get_dataloader
-from src.utils import same_seeds, save_model, load_model
+from src.utils import same_seeds, save_model, load_model, Logger
 
 if __name__ == '__main__':
     # 读取配置
-    accelerator = Accelerator()
-    config = EasyDict(yaml.load(open('./config.yml', 'r', encoding="utf-8"), Loader=yaml.FullLoader))
+    config = EasyDict(yaml.load(open('config.yml', 'r', encoding="utf-8"), Loader=yaml.FullLoader))
     same_seeds(42)
+    accelerator = Accelerator()
+    # Tensorboard
+    writer = SummaryWriter() if accelerator.is_local_main_process else None
+    Logger(writer.get_logdir() if writer is not None else None)
+
     accelerator.print(config)
 
     accelerator.print('加载数据集...')
@@ -28,9 +32,6 @@ if __name__ == '__main__':
     # 定义训练参数
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.trainer.lr)  # 优化器
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.trainer.num_epochs)
-
-    # Tensorboard
-    writer = SummaryWriter() if accelerator.is_local_main_process else None
 
     start_epoch = 0
     stale = 0
