@@ -25,7 +25,6 @@ if __name__ == '__main__':
     # 初始化模型，如果有GPU就用GPU，有几张卡就用几张
     accelerator.print('加载模型')
     model = timm.create_model('swin_base_patch4_window7_224', pretrained=False, num_classes=config.model.num_classes)
-
     # 定义训练参数
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.trainer.lr)  # 优化器
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.trainer.num_epochs)
@@ -41,11 +40,11 @@ if __name__ == '__main__':
 
     # 尝试继续训练
     if config.trainer.resume:
-        accelerator.print(f'从 {config.model.save_name} 加载预训练模型')
-        model, optimizer, scheduler, start_epoch = load_model(config.model.save_name, model, optimizer, scheduler)
-        accelerator.print(f'加载训练状态成功！从 epoch {start_epoch + 1} 开始训练')
+        model, optimizer, scheduler, start_epoch = load_model(config.model.save_name, model, optimizer, scheduler,
+                                                              accelerator)
 
-    model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(model, optimizer, scheduler, train_loader, val_loader)
+    model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(model, optimizer, scheduler,
+                                                                                train_loader, val_loader)
 
     # 开始训练
     accelerator.print("开始训练！")
@@ -87,7 +86,8 @@ if __name__ == '__main__':
         evaluate_result = evaluator.compute()
         accelerator.print(evaluate_result)
 
-        accelerator.print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] loss = {train_loss}, acc = {100 * evaluate_result['accuracy']:.5f} %")
+        accelerator.print(
+            f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] loss = {train_loss}, acc = {100 * evaluate_result['accuracy']:.5f} %")
 
         if accelerator.is_local_main_process:
             writer.add_scalar('Val Acc', evaluate_result['accuracy'], epoch)

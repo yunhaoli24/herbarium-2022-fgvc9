@@ -37,14 +37,21 @@ def load_model(path: str,
                model: nn.Module,
                optimizer: torch.optim.Optimizer,
                scheduler: torch.optim.lr_scheduler._LRScheduler,
+               accelerator: Accelerator
                ) -> Tuple[nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler, int]:
-    state_dict = download_model(path)
-    model.load_state_dict(state_dict['model'])
-    optimizer.load_state_dict(state_dict['optimizer'])
-    scheduler.load_state_dict(state_dict['scheduler'])
-    epoch = state_dict['epoch']
-    return model, optimizer, scheduler, epoch
-
+    accelerator.print(f'尝试从 {path} 加载预训练模型')
+    try:
+        state_dict = download_model(path)
+        model.load_state_dict(state_dict['model'])
+        optimizer.load_state_dict(state_dict['optimizer'])
+        scheduler.load_state_dict(state_dict['scheduler'])
+        epoch = state_dict['epoch']
+        accelerator.print(f'加载训练状态成功！从 epoch {epoch + 1} 开始训练')
+        return model, optimizer, scheduler, epoch
+    except Exception as e:
+        accelerator.print(f'加载训练状态失败！')
+        accelerator.print(e)
+        return model, optimizer, scheduler, 0
 
 def same_seeds(seed):
     torch.manual_seed(seed)
