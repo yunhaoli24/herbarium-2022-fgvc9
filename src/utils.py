@@ -1,33 +1,14 @@
 import json
 import os
 import sys
-from typing import Tuple
+from collections import OrderedDict
 
 import numpy as np
 import torch
-import torch.nn as nn
 from accelerate import Accelerator
 
 
-def save_model(path: str, epoch: int,
-               model: nn.Module,
-               optimizer: torch.optim.Optimizer,
-               scheduler: torch.optim.lr_scheduler._LRScheduler,
-               accelerator: Accelerator):
-    """
-    保存训练状态
-    """
-    accelerator.wait_for_everyone()
-    save_dict = {
-        'model': accelerator.unwrap_model(model).state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'scheduler': scheduler.state_dict(),
-        'epoch': epoch
-    }
-    accelerator.save(save_dict, path)
-
-
-def download_model(download_path, save_path=None, check_hash=True) -> nn.Module:
+def load_model_dict(download_path, save_path=None, check_hash=True) -> OrderedDict:
     if download_path.startswith('http'):
         state_dict = torch.hub.load_state_dict_from_url(download_path, model_dir=save_path, check_hash=check_hash, map_location=torch.device('cpu'))
     else:
@@ -35,25 +16,22 @@ def download_model(download_path, save_path=None, check_hash=True) -> nn.Module:
     return state_dict
 
 
-def load_model(path: str,
-               model: nn.Module,
-               optimizer: torch.optim.Optimizer,
-               scheduler: torch.optim.lr_scheduler._LRScheduler,
-               accelerator: Accelerator
-               ) -> Tuple[nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler, int]:
-    accelerator.print(f'尝试从 {path} 加载预训练模型')
+def resume_train_state(path: str, train_loader: torch.utils.data.DataLoader, accelerator: Accelerator):
     try:
-        state_dict = download_model(path)
-        model.load_state_dict(state_dict['model'])
-        optimizer.load_state_dict(state_dict['optimizer'])
-        scheduler.load_state_dict(state_dict['scheduler'])
-        epoch = state_dict['epoch']
-        accelerator.print(f'加载训练状态成功！从 epoch {epoch + 1} 开始训练')
-        return model, optimizer, scheduler, epoch
+        # Get the most recent checkpoint
+        base_path = os.getcwd() + '/' + path
+        dirs = [base_path + '/' + f.name for f in os.scandir(base_path) if f.is_dir()]
+        dirs.sort(key=os.path.getctime)  # Sorts folders by date modified, most recent checkpoint is the last
+        accelerator.load_state(dirs[-1])
+        training_difference = os.path.splitext(dirs[-1])[0]
+        starting_epoch = int(training_difference.replace(f"{base_path}/epoch_", "")) + 1
+        step = starting_epoch * len(train_loader)
+        accelerator.print(f'加载训练状态成功！从{starting_epoch}开始训练')
+        return starting_epoch, step
     except Exception as e:
-        accelerator.print(f'加载训练状态失败！')
         accelerator.print(e)
-        return model, optimizer, scheduler, 0
+        accelerator.print(f'加载训练状态失败！')
+        return 0, 0
 
 
 def same_seeds(seed):
@@ -70,10 +48,12 @@ class Logger(object):
     def __init__(self, logdir: str):
         self.console = sys.stdout
         if logdir is not None:
+            os.makedirs(logdir)
             self.log_file = open(logdir + '/log.txt', 'w')
         else:
             self.log_file = None
         sys.stdout = self
+        sys.stderr = self
 
     def __del__(self):
         self.close()

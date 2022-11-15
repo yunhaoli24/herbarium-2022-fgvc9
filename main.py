@@ -1,110 +1,125 @@
+import os
+from datetime import datetime
+from typing import Dict
+
 import evaluate
+import pytz
 import timm
 import torch
 import yaml
-import torch.nn.functional as F
-from easydict import EasyDict
-from torch.optim import lr_scheduler
-from torch.utils.tensorboard import SummaryWriter
-from tqdm.auto import tqdm
 from accelerate import Accelerator
+from easydict import EasyDict
+from objprint import objstr
+from timm.optim import optim_factory
+from torch.utils.tensorboard import SummaryWriter
 
+from src import utils
 from src.loader import get_dataloader
-from src.utils import same_seeds, save_model, load_model, Logger
+from src.optimizer import LinearWarmupCosineAnnealingLR
+from src.utils import Logger
+
+
+def train_one_epoch(model: torch.nn.Module, loss_functions: Dict[str, torch.nn.modules.loss._Loss], train_loader: torch.utils.data.DataLoader,
+                    optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler._LRScheduler,
+                    accelerator: Accelerator, epoch: int, step: int):
+    # 训练
+    model.train()
+    total_loss = 0
+
+    for i, image, label in enumerate(train_loader):
+        seg_result = model(image)
+
+        total_loss = 0
+        for name in loss_functions:
+            loss = loss_functions[name](seg_result, label)
+            accelerator.log({name: float(loss)}, step=step)
+            total_loss += loss
+
+        accelerator.backward(total_loss)
+        optimizer.step()
+        optimizer.zero_grad()
+        accelerator.log({
+            'Train Total Loss': float(total_loss),
+        }, step=step)
+        accelerator.print(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training [{i}/{len(train_loader)}] Loss: {total_loss:1.5f}')
+        step += 1
+    scheduler.step(epoch)
+    return total_loss, step
+
+
+def val_one_epoch(model: torch.nn.Module, val_loader: torch.utils.data.DataLoader,
+                  config: EasyDict, accelerator: Accelerator):
+    # 验证
+    model.eval()
+    evaluator = evaluate.load("accuracy")
+    for i, features, labels in enumerate(val_loader):
+        with torch.no_grad():
+            logits = model(features)
+        predictions = logits.argmax(dim=-1)
+        evaluator.add_batch(predictions=predictions, references=labels)
+        accelerator.print(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation [{i}/{len(val_loader)}]')
+
+    evaluate_result = evaluator.compute()
+
+    accelerator.log({
+        'acc': float(evaluate_result['accuracy']),
+    }, step=step)
+    return float(evaluate_result['accuracy'])
+
 
 if __name__ == '__main__':
     # 读取配置
     config = EasyDict(yaml.load(open('config.yml', 'r', encoding="utf-8"), Loader=yaml.FullLoader))
-    same_seeds(42)
-    accelerator = Accelerator()
-    # Tensorboard
-    writer = SummaryWriter() if accelerator.is_local_main_process else None
-    Logger(writer.get_logdir() if writer is not None else None)
-
-    accelerator.print(config)
+    utils.same_seeds(42)
+    logging_dir = os.getcwd() + '/logs/' + str(datetime.now(tz=pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d-%H:%M:%S"))
+    accelerator = Accelerator(log_with=["tensorboard"], logging_dir=logging_dir)
+    Logger(logging_dir if accelerator.is_local_main_process else None)
+    accelerator.init_trackers(os.path.split(__file__)[-1].split(".")[0])
+    accelerator.print(objstr(config))
 
     accelerator.print('加载数据集...')
     train_loader, val_loader = get_dataloader(config)
 
     # 初始化模型，如果有GPU就用GPU，有几张卡就用几张
-    accelerator.print('加载模型')
+    accelerator.print('加载模型...')
     model = timm.create_model('swin_base_patch4_window7_224', pretrained=False, num_classes=config.model.num_classes)
-    # 定义训练参数
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.trainer.lr)  # 优化器
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.trainer.num_epochs)
 
-    start_epoch = 0
-    stale = 0
+    # 定义训练参数
+    optimizer = optim_factory.create_optimizer_v2(model, opt=config.trainer.optimizer,
+                                                  weight_decay=config.trainer.weight_decay,
+                                                  lr=config.trainer.lr, betas=(0.9, 0.95))
+    scheduler = LinearWarmupCosineAnnealingLR(optimizer, warmup_epochs=config.trainer.warmup, max_epochs=config.trainer.num_epochs)
+    loss_functions = {
+        'cross_entropy_loss': torch.nn.CrossEntropyLoss()
+    }
+
     best_acc = 0
     step = 0
-    patience = config.trainer.num_epochs / 2
+    starting_epoch = 0
+
+    model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(model, optimizer, scheduler, train_loader, val_loader)
 
     # 尝试继续训练
     if config.trainer.resume:
-        model, optimizer, scheduler, start_epoch = load_model(config.model.save_name, model, optimizer, scheduler,
-                                                              accelerator)
-
-    model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(model, optimizer, scheduler,
-                                                                                train_loader, val_loader)
+        starting_epoch, step = utils.resume_train_state(config.save_dir, train_loader, accelerator)
 
     # 开始训练
     accelerator.print("开始训练！")
 
-    for epoch in range(start_epoch, config.trainer.num_epochs):
-
+    for epoch in range(starting_epoch, config.trainer.num_epochs):
         # 训练
-        model.train()
-        train_loss = 0
-        train_bar = tqdm(train_loader, disable=not accelerator.is_local_main_process)
-        if accelerator.is_local_main_process:
-            train_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training')
-        for features, labels in train_bar:
-            logits = model(features)
-            loss = F.cross_entropy(logits, labels)
-            accelerator.backward(loss)
-            optimizer.step()
-            scheduler.step()
-            optimizer.zero_grad()
-            if accelerator.is_local_main_process:
-                train_loss = '{0:1.5f}'.format(loss)
-                train_bar.set_postfix({'loss': f'{train_loss}'})
-                writer.add_scalar('Train Loss', loss, step)
-                step += 1
-
+        train_loss, step = train_one_epoch(model, loss_functions, train_loader, optimizer, scheduler, accelerator, epoch, step)
         # 验证
-        model.eval()
-        evaluator = evaluate.load("accuracy")
-        val_bar = tqdm(val_loader, disable=not accelerator.is_local_main_process)
-        if accelerator.is_local_main_process:
-            val_bar.set_description(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation')
-        for features, labels in val_bar:
-            with torch.no_grad():
-                logits = model(features)
-            predictions = logits.argmax(dim=-1)
-            evaluator.add_batch(predictions=predictions, references=labels)
+        acc = val_one_epoch(model, val_loader, config, accelerator)
 
-        # 计算loss和acc并保存到tensorboard
-        evaluate_result = evaluator.compute()
-        accelerator.print(evaluate_result)
-
-        accelerator.print(
-            f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] loss = {train_loss}, acc = {100 * evaluate_result['accuracy']:.5f} %")
-
-        if accelerator.is_local_main_process:
-            writer.add_scalar('Val Acc', evaluate_result['accuracy'], epoch)
+        accelerator.print(f'mean acc: {100 * acc:.5f}%')
+        accelerator.print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] lr = {scheduler.get_last_lr()}, loss = {train_loss:.5f}, acc = {100 * acc:.5f} %")
 
         # 保存模型
-        if evaluate_result['accuracy'] > best_acc:
-            best_acc = evaluate_result['accuracy']
-            accelerator.print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] 保存模型")
-            # 保存模型
-            save_model(config.model.save_name, epoch, model, optimizer, scheduler, accelerator)
-            stale = 0
-        else:
-            stale += 1
-            if stale > patience:
-                accelerator.print(f"连续的 {patience}  epochs 模型没有提升，停止训练")
-                accelerator.end_training()
-                break
+        if acc > best_acc:
+            accelerator.save_state(output_dir=f"{os.getcwd()}/{config.save_dir}/best")
+            best_acc = acc
+
+        accelerator.save_state(output_dir=f"{os.getcwd()}/{config.save_dir}/epoch_{epoch}")
 
     accelerator.print(f"最高acc: {best_acc:.5f}")

@@ -10,3 +10,4 @@ pandas
 evaluate
 sklearn
 timm
+objprint

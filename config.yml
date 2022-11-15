@@ -1,10 +1,14 @@
 trainer:
   num_epochs: 200
+  warmup: 5
   batch_size: 64
-  resume: True
+  optimizer: adamw
+  weight_decay: 0.05
   lr: 0.0001
+  resume: True
   num_workers: 8
-  dataset_path: /home/liyunhao/workplace/remote-datasets/cv/cls/herbarium-2022-fgvc9/
+  save_dir: output
+  dataset_path: /dataset/cv/cls/herbarium-2022-fgvc9/
 model:
   save_name: swin.pth
   num_classes: 15505

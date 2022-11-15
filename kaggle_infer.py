@@ -33,8 +33,8 @@ def kaggle_test(model: nn.Module, config: EasyDict):
     accelerator.wait_for_everyone()
     accuracy.finalize = types.MethodType(lambda self: self._finalize(), accuracy)
     accuracy.finalize()
-    predictions = accuracy.data['predictions']
-    references = accuracy.data['references']
+    predictions = accelerator.gather(accuracy.data['predictions'])
+    references = accelerator.gather(accuracy.data['references'])
     if accelerator.is_local_main_process:
         print(len(predictions))
         submission = pd.DataFrame({"id": references, "Predicted": predictions}).set_index("id")
