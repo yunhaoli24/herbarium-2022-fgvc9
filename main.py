@@ -26,6 +26,12 @@ def train_one_epoch(model: torch.nn.Module, loss_function: torch.nn.modules.loss
     total_loss = 0
 
     for i, batch in enumerate(train_loader):
+
+        # 第5轮之后加入全部参数
+        if epoch > 5:
+            for key, params in model.named_parameters():
+                params.requires_grad = True
+
         image, label_dict = batch[0], batch[1]
         category, genus, institution = model(image)
 
@@ -95,6 +101,10 @@ if __name__ == '__main__':
         drop_path_rate=0.3, global_pool=True, genus=config.model.genus, institution=config.model.institution)
     # 加载预训练模型
     model.load_state_dict(torch.load('checkpoint-18.pth')['model'], strict=False)
+    # 设置只有头可以训练
+    for key, params in model.named_parameters():
+        if not key.endswith('head'):
+            params.requires_grad = False
 
     accelerator.print('加载数据集...')
     train_loader, val_loader = get_dataloader(config)
