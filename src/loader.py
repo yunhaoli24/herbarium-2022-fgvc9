@@ -2,9 +2,8 @@ import json
 from typing import Callable, List, Dict, Tuple
 
 import torch
-import torchvision
 import torch.utils.data.dataset
-
+import torchvision
 from easydict import EasyDict
 
 from src.utils import split_data_8_2
@@ -32,7 +31,7 @@ class HerbariumDataset(torchvision.datasets.VisionDataset):
         self.sample_list = sample_list
         self.loader = torchvision.datasets.folder.default_loader
 
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, Dict]:
         """
         返回一个样本
         :param index: 样本下标
@@ -41,7 +40,7 @@ class HerbariumDataset(torchvision.datasets.VisionDataset):
         path = self.root + 'train_images/' + self.sample_list[index]["file_name"]
         image = self.loader(path)
         sample = self.transforms(image)
-        return sample, self.sample_list[index]['category_id']
+        return sample, self.sample_list[index]
 
     def __len__(self) -> int:
         return len(self.sample_list)
@@ -75,7 +74,7 @@ def get_dataloader(config: EasyDict) -> Tuple[torch.utils.data.DataLoader, torch
     train_dataset = HerbariumDataset(root=config.trainer.dataset_path, sample_list=train_samples, transforms=train_transform)
     val_dataset = HerbariumDataset(root=config.trainer.dataset_path, sample_list=val_samples, transforms=test_transform)
 
-    # train_subset = torch.utils.data.Subset(train_dataset, range(int(len(train_dataset) * 0.001)))
+    # train_subset = torch.utils.data.Subset(train_dataset, range(int(len(train_dataset) * 0.001)))  # TODO
     # val_subset = torch.utils.data.Subset(val_dataset, range(int(len(val_dataset) * 0.001)))
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.trainer.batch_size, shuffle=True)

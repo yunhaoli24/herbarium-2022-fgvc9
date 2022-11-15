@@ -12,3 +12,5 @@ trainer:
 model:
   save_name: swin.pth
   num_classes: 15505
+  genus: 2564
+  institution: 58

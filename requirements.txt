@@ -11,3 +11,4 @@ evaluate
 sklearn
 timm
 objprint
+scikit-learn
