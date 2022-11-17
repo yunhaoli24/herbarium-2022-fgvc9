@@ -25,14 +25,8 @@ def train_one_epoch(model: torch.nn.Module, loss_function: torch.nn.modules.loss
     model.train()
     total_loss = 0
 
-    for i, batch in enumerate(train_loader):
+    for i, (image, label_dict) in enumerate(train_loader):
 
-        # 第5轮之后加入全部参数
-        if epoch > 5:
-            for key, params in model.named_parameters():
-                params.requires_grad = True
-
-        image, label_dict = batch[0], batch[1]
         category, genus, institution = model(image)
 
         loss_category = loss_function(category, label_dict['category_id'])
@@ -67,10 +61,9 @@ def val_one_epoch(model: torch.nn.Module, val_loader: torch.utils.data.DataLoade
     # 验证
     model.eval()
     evaluator = evaluate.load("accuracy")
-    for i, batch in enumerate(val_loader):
-        features, label_dict = batch[0], batch[1]
+    for i, (image, label_dict) in enumerate(val_loader):
         with torch.no_grad():
-            category, genus, institution = model(features)
+            category, genus, institution = model(image)
         predictions = category.argmax(dim=-1)
         evaluator.add_batch(predictions=predictions, references=label_dict['category_id'])
         accelerator.print(f'Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation [{i}/{len(val_loader)}]')
@@ -99,12 +92,6 @@ if __name__ == '__main__':
         patch_size=16, embed_dim=1024, depth=24, num_heads=16, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(torch.nn.LayerNorm, eps=1e-6), num_classes=config.model.num_classes,
         drop_path_rate=0.3, global_pool=True, genus=config.model.genus, institution=config.model.institution)
-    # 加载预训练模型
-    model.load_state_dict(torch.load('checkpoint-18.pth')['model'], strict=False)
-    # 设置只有头可以训练
-    for key, params in model.named_parameters():
-        if not key.endswith('head'):
-            params.requires_grad = False
 
     accelerator.print('加载数据集...')
     train_loader, val_loader = get_dataloader(config)
