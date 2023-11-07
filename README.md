@@ -4,6 +4,3 @@
 ```shell
 bash train.sh
 ```
-![](https://img.peterli.club/scooter/Login.gif)
-
-[](https://img.peterli.club/scooter/Login.gif)
